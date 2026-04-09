@@ -11,8 +11,6 @@ http:
     - 192.168.0.0/16  # 局域网段
     - 10.0.0.0/8      # 其他内部网段
 
-homeassistant:
-  time_zone: Asia/Shanghai
 
 automation: !include automations.yaml
 script: !include scripts.yaml
