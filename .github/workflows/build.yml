@@ -84,14 +84,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+        
       - name: Get latest HA version
         id: ha_version
         run: |
           if [ -n "${{ github.event.inputs.force_version }}" ]; then
             VERSION="${{ github.event.inputs.force_version }}"
           else
-            VERSION=$(curl -sf https://version.home-assistant.io/stable.json | jq -r '.homeassistant')
+            VERSION=$(curl -sf https://version.home-assistant.io/stable.json | jq -r '.default')
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "HA version: $VERSION"
