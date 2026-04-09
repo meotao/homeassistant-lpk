@@ -1,10 +1,7 @@
-lzc-sdk-version: '0.1'
 application:
   subdomain: homeassistant
   routes:
     - /=http://homeassistant.cloud.lazycat.app.homeassistant.lzcapp:8123
-  depends_on:
-    - homeassistant
   background_task: true
 services:
   init:
@@ -51,7 +48,6 @@ services:
       - TZ=Asia/Shanghai
     binds:
       - /lzcapp/var/homeassistant:/config
-    privileged: true
     network_mode: host
     depends_on:
       - init
