@@ -8,7 +8,7 @@ application:
   background_task: true
 services:
   init:
-    image: ghcr.io/YOUR_GITHUB_USER/ha-lazycat-init:latest
+    image: INIT_IMAGE_PLACEHOLDER
     command: >-
       sh -c "
       set -ex;
