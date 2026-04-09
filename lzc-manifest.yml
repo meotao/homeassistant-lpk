@@ -1,0 +1,63 @@
+lzc-sdk-version: '0.1'
+application:
+  subdomain: homeassistant
+  routes:
+    - /=http://homeassistant.cloud.lazycat.app.homeassistant.lzcapp:8123
+  depends_on:
+    - homeassistant
+  background_task: true
+services:
+  init:
+    image: ghcr.io/YOUR_GITHUB_USER/ha-lazycat-init:latest
+    command: >-
+      sh -c "
+      set -ex;
+
+      if [ ! -d /mnt/homeassistant ]; then
+        cp -R /etc/homeassistant /mnt/;
+      fi
+
+      if [ ! -f /mnt/homeassistant/configuration.yaml ]; then
+        cp /etc/configuration.yaml /mnt/homeassistant/configuration.yaml;
+      fi
+
+      if [ $(grep http /mnt/homeassistant/configuration.yaml | wc -l) -eq 0 ]; then
+        cp /etc/configuration.yaml /mnt/homeassistant/configuration.yaml;
+      fi
+
+      FLAG=/mnt/homeassistant/.hacs_installed;
+      SRC=/lzcapp/pkg/content/custom_components/hacs;
+      DST=/mnt/homeassistant/custom_components;
+      VER_FILE=/lzcapp/pkg/content/.hacs_bundled_version;
+      BUNDLED=$(cat $VER_FILE 2>/dev/null || echo unknown);
+      INSTALLED=$(cat $FLAG 2>/dev/null || echo none);
+
+      if [ \"$BUNDLED\" != \"$INSTALLED\" ]; then
+        echo '[HACS] installing' $BUNDLED '...';
+        mkdir -p $DST;
+        cp -r $SRC $DST/;
+        echo $BUNDLED > $FLAG;
+        echo '[HACS] done';
+      fi;
+
+      while true; do sleep 10000; done
+      "
+    binds:
+      - /lzcapp/var:/mnt
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:IMAGE_TAG
+    environment:
+      - TZ=Asia/Shanghai
+    binds:
+      - /lzcapp/var/homeassistant:/config
+    privileged: true
+    network_mode: host
+    depends_on:
+      - init
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8123"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
