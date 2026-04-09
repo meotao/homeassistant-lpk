@@ -11,18 +11,15 @@ on:
         default: ''
 
 env:
-  # init 镜像推送到你自己的 ghcr.io，替换为你的 GitHub 用户名
   INIT_IMAGE: ghcr.io/${{ github.repository_owner }}/ha-lazycat-init
 
 jobs:
-  # ── Job 1: 构建并推送 init 镜像（仅当 init-image/ 目录有变更时）──────
+  # ── Job 1: 构建并推送 init 镜像（仅当 init-image/ 有变更或镜像不存在时）──
   build-init-image:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
 
     steps:
       - name: Checkout
@@ -30,18 +27,19 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Check if init-image changed
+      - name: Check if init-image changed or missing
         id: changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 检查 init-image/ 目录是否有变更
           if git diff --name-only HEAD~1 HEAD | grep -q '^init-image/'; then
             echo "changed=true" >> $GITHUB_OUTPUT
+            echo "init-image changed, will rebuild."
           else
-            # 检查镜像是否已存在，不存在则强制构建
-            TOKEN=$(echo ${{ secrets.GITHUB_TOKEN }} | base64)
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://ghcr.io/v2/${{ github.repository_owner }}/ha-lazycat-init/manifests/latest")
-            if [ "$STATUS" = "200" ]; then
+            # 用 gh api 检查镜像包是否存在（使用 GITHUB_TOKEN 自动鉴权）
+            if gh api /users/${{ github.repository_owner }}/packages/container/ha-lazycat-init \
+                --silent 2>/dev/null; then
               echo "changed=false" >> $GITHUB_OUTPUT
               echo "Init image exists and unchanged, skipping build."
             else
@@ -69,12 +67,11 @@ jobs:
           context: ./init-image
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.INIT_IMAGE }}:latest
+          tags: ${{ env.INIT_IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Job 2: 构建 LPK ──────────────────────────────────────────────────
+  # ── Job 2: 构建 LPK ──────────────────────────────────────────────────────
   build-lpk:
     runs-on: ubuntu-latest
     needs: build-init-image
@@ -84,14 +81,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        
+
+      # Bug 1 修复：API 字段从 .homeassistant 改为 .default
       - name: Get latest HA version
         id: ha_version
         run: |
           if [ -n "${{ github.event.inputs.force_version }}" ]; then
             VERSION="${{ github.event.inputs.force_version }}"
           else
-            VERSION=$(curl -sf https://version.home-assistant.io/stable.json | jq -r '.default')
+            VERSION=$(curl -sf https://version.home-assistant.io/stable.json \
+              | jq -r '.default')
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "HA version: $VERSION"
@@ -109,6 +108,7 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
+      # HACS 构建期打包（离线，无需运行时网络）
       - name: Download HACS into contentdir
         if: steps.check_release.outputs.skip == 'false'
         run: |
@@ -123,7 +123,8 @@ jobs:
           rm hacs.zip
           echo "$HACS_VER" > content/.hacs_bundled_version
 
-      - name: Generate package.yml (LPK V2)
+      # LPK V2：元数据与权限声明全部在 package.yml
+      - name: Generate package.yml
         if: steps.check_release.outputs.skip == 'false'
         run: |
           VERSION="${{ steps.ha_version.outputs.version }}"
@@ -148,21 +149,20 @@ jobs:
               description: Open-source home automation with HACS, local control and privacy first
           EOF
 
-      - name: Patch manifest (image version + init image ref)
+      - name: Patch manifest
         if: steps.check_release.outputs.skip == 'false'
         run: |
           VERSION="${{ steps.ha_version.outputs.version }}"
           OWNER="${{ github.repository_owner }}"
           sed -i "s|IMAGE_TAG|${VERSION}|g" lzc-manifest.yml
-          sed -i "s|YOUR_GITHUB_USER|${OWNER}|g" lzc-manifest.yml
+          sed -i "s|INIT_IMAGE_PLACEHOLDER|ghcr.io/${OWNER}/ha-lazycat-init:latest|g" lzc-manifest.yml
 
+      # Bug 2 修复：通过 npm 安装，官方文档确认的正确方式
       - name: Install lzc-cli
         if: steps.check_release.outputs.skip == 'false'
         run: |
-          # ⚠️ 请至 https://developer.lazycat.cloud/lzc-cli.html 确认最新安装地址
-          curl -fsSL https://lazycat.cloud/lzc-cli-linux-amd64 -o lzc-cli
-          chmod +x lzc-cli
-          sudo mv lzc-cli /usr/local/bin/lzc-cli
+          npm install -g @lazycatcloud/lzc-cli
+          lzc-cli --version
 
       - name: Build LPK
         if: steps.check_release.outputs.skip == 'false'
