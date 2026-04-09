@@ -5,7 +5,6 @@ application:
   background_task: true
 services:
   init:
-    # 替换为你的账号空间
     image: registry.lazycat.cloud/u16207715/ha-lazycat-init:latest
     command: >-
       sh -c '
@@ -38,7 +37,6 @@ services:
       - /lzcapp/var:/mnt
 
   homeassistant:
-    # 替换为你的账号空间
     image: registry.lazycat.cloud/u16207715/home-assistant:IMAGE_TAG
     environment:
       - TZ=Asia/Shanghai
