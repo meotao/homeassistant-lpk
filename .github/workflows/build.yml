@@ -1,0 +1,188 @@
+name: Build Home Assistant LPK
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: '强制指定 HA 版本（留空则自动获取最新）'
+        required: false
+        default: ''
+
+env:
+  # init 镜像推送到你自己的 ghcr.io，替换为你的 GitHub 用户名
+  INIT_IMAGE: ghcr.io/${{ github.repository_owner }}/ha-lazycat-init
+
+jobs:
+  # ── Job 1: 构建并推送 init 镜像（仅当 init-image/ 目录有变更时）──────
+  build-init-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if init-image changed
+        id: changed
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q '^init-image/'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            # 检查镜像是否已存在，不存在则强制构建
+            TOKEN=$(echo ${{ secrets.GITHUB_TOKEN }} | base64)
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://ghcr.io/v2/${{ github.repository_owner }}/ha-lazycat-init/manifests/latest")
+            if [ "$STATUS" = "200" ]; then
+              echo "changed=false" >> $GITHUB_OUTPUT
+              echo "Init image exists and unchanged, skipping build."
+            else
+              echo "changed=true" >> $GITHUB_OUTPUT
+              echo "Init image not found, forcing build."
+            fi
+          fi
+
+      - name: Login to GHCR
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push init image
+        if: steps.changed.outputs.changed == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./init-image
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.INIT_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Job 2: 构建 LPK ──────────────────────────────────────────────────
+  build-lpk:
+    runs-on: ubuntu-latest
+    needs: build-init-image
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest HA version
+        id: ha_version
+        run: |
+          if [ -n "${{ github.event.inputs.force_version }}" ]; then
+            VERSION="${{ github.event.inputs.force_version }}"
+          else
+            VERSION=$(curl -sf https://version.home-assistant.io/stable.json | jq -r '.homeassistant')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "HA version: $VERSION"
+
+      - name: Check if already built
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ha_version.outputs.version }}"
+          if gh release view "$TAG" --json tagName -q .tagName > /dev/null 2>&1; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "$TAG already released, skipping."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download HACS into contentdir
+        if: steps.check_release.outputs.skip == 'false'
+        run: |
+          HACS_VER=$(curl -sf \
+            https://api.github.com/repos/hacs/integration/releases/latest \
+            | jq -r '.tag_name')
+          echo "HACS version: $HACS_VER"
+          mkdir -p content/custom_components
+          curl -Lo hacs.zip \
+            "https://github.com/hacs/integration/releases/download/${HACS_VER}/hacs.zip"
+          unzip -q hacs.zip -d content/custom_components/hacs
+          rm hacs.zip
+          echo "$HACS_VER" > content/.hacs_bundled_version
+
+      - name: Generate package.yml (LPK V2)
+        if: steps.check_release.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.ha_version.outputs.version }}"
+          cat > package.yml <<EOF
+          package: cloud.lazycat.app.homeassistant
+          version: ${VERSION}
+          name: Home Assistant
+          description: 开源家庭自动化平台，含 HACS，本地控制，隐私优先
+          author: Community Port
+          homepage: https://www.home-assistant.io
+          permissions:
+            required:
+              - net.host
+              - net.lan
+              - net.internet
+          locales:
+            zh-CN:
+              name: Home Assistant
+              description: 开源家庭自动化平台，含 HACS，本地控制，隐私优先
+            en-US:
+              name: Home Assistant
+              description: Open-source home automation with HACS, local control and privacy first
+          EOF
+
+      - name: Patch manifest (image version + init image ref)
+        if: steps.check_release.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.ha_version.outputs.version }}"
+          OWNER="${{ github.repository_owner }}"
+          sed -i "s|IMAGE_TAG|${VERSION}|g" lzc-manifest.yml
+          sed -i "s|YOUR_GITHUB_USER|${OWNER}|g" lzc-manifest.yml
+
+      - name: Install lzc-cli
+        if: steps.check_release.outputs.skip == 'false'
+        run: |
+          # ⚠️ 请至 https://developer.lazycat.cloud/lzc-cli.html 确认最新安装地址
+          curl -fsSL https://lazycat.cloud/lzc-cli-linux-amd64 -o lzc-cli
+          chmod +x lzc-cli
+          sudo mv lzc-cli /usr/local/bin/lzc-cli
+
+      - name: Build LPK
+        if: steps.check_release.outputs.skip == 'false'
+        run: |
+          lzc-cli project build -o ./
+          ls -lh *.lpk
+
+      - name: Restore manifest template
+        if: steps.check_release.outputs.skip == 'false'
+        run: git checkout -- lzc-manifest.yml
+
+      - name: Create GitHub Release
+        if: steps.check_release.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.ha_version.outputs.version }}"
+          LPK=$(ls *.lpk | head -1)
+          HACS_VER=$(cat content/.hacs_bundled_version)
+          gh release create "v${VERSION}" \
+            --title "Home Assistant ${VERSION}（含 HACS ${HACS_VER}）" \
+            --notes "HA ${VERSION} + HACS ${HACS_VER}，时区 Asia/Shanghai（UTC+8），HACS 离线内置。" \
+            "$LPK"
