@@ -32,12 +32,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 检查 init-image/ 目录是否有变更
           if git diff --name-only HEAD~1 HEAD | grep -q '^init-image/'; then
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "init-image changed, will rebuild."
           else
-            # 用 gh api 检查镜像包是否存在（使用 GITHUB_TOKEN 自动鉴权）
             if gh api /users/${{ github.repository_owner }}/packages/container/ha-lazycat-init \
                 --silent 2>/dev/null; then
               echo "changed=false" >> $GITHUB_OUTPUT
@@ -82,7 +80,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Bug 1 修复：API 字段从 .homeassistant 改为 .default
       - name: Get latest HA version
         id: ha_version
         run: |
@@ -108,7 +105,6 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      # HACS 构建期打包（离线，无需运行时网络）
       - name: Download HACS into contentdir
         if: steps.check_release.outputs.skip == 'false'
         run: |
@@ -123,7 +119,6 @@ jobs:
           rm hacs.zip
           echo "$HACS_VER" > content/.hacs_bundled_version
 
-      # LPK V2：元数据与权限声明全部在 package.yml
       - name: Generate package.yml
         if: steps.check_release.outputs.skip == 'false'
         run: |
@@ -140,6 +135,7 @@ jobs:
               - net.host
               - net.lan
               - net.internet
+              - compose.override
           locales:
             zh-CN:
               name: Home Assistant
@@ -157,7 +153,6 @@ jobs:
           sed -i "s|IMAGE_TAG|${VERSION}|g" lzc-manifest.yml
           sed -i "s|INIT_IMAGE_PLACEHOLDER|ghcr.io/${OWNER}/ha-lazycat-init:latest|g" lzc-manifest.yml
 
-      # Bug 2 修复：通过 npm 安装，官方文档确认的正确方式
       - name: Install lzc-cli
         if: steps.check_release.outputs.skip == 'false'
         run: |
@@ -167,7 +162,7 @@ jobs:
       - name: Build LPK
         if: steps.check_release.outputs.skip == 'false'
         run: |
-          lzc-cli project build -o ./
+          lzc-cli project build
           ls -lh *.lpk
 
       - name: Restore manifest template
