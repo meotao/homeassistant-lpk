@@ -2,3 +2,8 @@ pkgout: ./
 icon: ./icon.png
 manifest: ./lzc-manifest.yml
 contentdir: ./content
+
+compose_override:
+  services:
+    homeassistant:
+      privileged: true
