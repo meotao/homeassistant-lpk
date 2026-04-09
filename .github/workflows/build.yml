@@ -87,7 +87,7 @@ jobs:
             VERSION="${{ github.event.inputs.force_version }}"
           else
             VERSION=$(curl -sf https://version.home-assistant.io/stable.json \
-              | jq -r '.default')
+              | jq -r '.homeassistant.default')
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "HA version: $VERSION"
