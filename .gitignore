@@ -1,0 +1,4 @@
+content/
+package.yml
+*.lpk
+.agents/
