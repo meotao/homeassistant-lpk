@@ -6,21 +6,22 @@ application:
 services:
   init:
     image: INIT_IMAGE_PLACEHOLDER
+    # 使用单引号包裹脚本，防止 YAML 解析器提前展开 $ 变量
     command: >-
-      sh -c "
+      sh -c '
       set -ex;
 
       if [ ! -d /mnt/homeassistant ]; then
         cp -R /etc/homeassistant /mnt/;
-      fi
+      fi;
 
       if [ ! -f /mnt/homeassistant/configuration.yaml ]; then
         cp /etc/configuration.yaml /mnt/homeassistant/configuration.yaml;
-      fi
+      fi;
 
       if [ $(grep http /mnt/homeassistant/configuration.yaml | wc -l) -eq 0 ]; then
         cp /etc/configuration.yaml /mnt/homeassistant/configuration.yaml;
-      fi
+      fi;
 
       FLAG=/mnt/homeassistant/.hacs_installed;
       SRC=/lzcapp/pkg/content/custom_components/hacs;
@@ -29,16 +30,16 @@ services:
       BUNDLED=$(cat $VER_FILE 2>/dev/null || echo unknown);
       INSTALLED=$(cat $FLAG 2>/dev/null || echo none);
 
-      if [ \"$BUNDLED\" != \"$INSTALLED\" ]; then
-        echo '[HACS] installing' $BUNDLED '...';
+      if [ "$BUNDLED" != "$INSTALLED" ]; then
+        echo "[HACS] installing $BUNDLED ...";
         mkdir -p $DST;
         cp -r $SRC $DST/;
         echo $BUNDLED > $FLAG;
-        echo '[HACS] done';
+        echo "[HACS] done";
       fi;
 
       while true; do sleep 10000; done
-      "
+      '
     binds:
       - /lzcapp/var:/mnt
 
