@@ -6,7 +6,7 @@ application:
 services:
   init:
     image: INIT_IMAGE_PLACEHOLDER
-    # 使用单引号包裹脚本，防止 YAML 解析器提前展开 $ 变量
+    # 使用单引号包裹脚本，并使用 $$ 转义变量，防止 YAML 解析器提前展开
     command: >-
       sh -c '
       set -ex;
@@ -19,7 +19,7 @@ services:
         cp /etc/configuration.yaml /mnt/homeassistant/configuration.yaml;
       fi;
 
-      if [ $(grep http /mnt/homeassistant/configuration.yaml | wc -l) -eq 0 ]; then
+      if [ $$(grep http /mnt/homeassistant/configuration.yaml | wc -l) -eq 0 ]; then
         cp /etc/configuration.yaml /mnt/homeassistant/configuration.yaml;
       fi;
 
@@ -27,14 +27,14 @@ services:
       SRC=/lzcapp/pkg/content/custom_components/hacs;
       DST=/mnt/homeassistant/custom_components;
       VER_FILE=/lzcapp/pkg/content/.hacs_bundled_version;
-      BUNDLED=$(cat $VER_FILE 2>/dev/null || echo unknown);
-      INSTALLED=$(cat $FLAG 2>/dev/null || echo none);
+      BUNDLED=$$(cat $$VER_FILE 2>/dev/null || echo unknown);
+      INSTALLED=$$(cat $$FLAG 2>/dev/null || echo none);
 
-      if [ "$BUNDLED" != "$INSTALLED" ]; then
-        echo "[HACS] installing $BUNDLED ...";
-        mkdir -p $DST;
-        cp -r $SRC $DST/;
-        echo $BUNDLED > $FLAG;
+      if [ "$$BUNDLED" != "$$INSTALLED" ]; then
+        echo "[HACS] installing $$BUNDLED ...";
+        mkdir -p $$DST;
+        cp -r $$SRC $$DST/;
+        echo $$BUNDLED > $$FLAG;
         echo "[HACS] done";
       fi;
 
